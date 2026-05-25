@@ -38,6 +38,14 @@ type startArgs struct {
 	payload                *commonpb.Payload
 	nexusLinks             []nexus.Link
 	serializedRef          []byte
+	// serviceCallerPrincipal and endUserCallerPrincipal are captured at
+	// schedule time from server-trusted state and attached as HTTP metadata
+	// to the outbound dispatch. Either may be nil if the caller did not
+	// have a principal in scope (e.g. authorizer didn't compute one, or
+	// the workflow predates the feature). The handler-side server reads
+	// them via headers.GetPrincipal / headers.GetEndUserPrincipal.
+	serviceCallerPrincipal *commonpb.Principal
+	endUserCallerPrincipal *commonpb.Principal
 }
 
 // invocationTraceContext captures per-call contextual information needed to set up HTTP tracing.

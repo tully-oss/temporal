@@ -168,6 +168,13 @@ func (h *operationInvocationTaskHandler) Execute(
 	if h.config.UseNewFailureWireFormat(ns.Name().String()) {
 		header.Set(nexusrpc.HeaderTemporalNexusFailureSupport, "true")
 	}
+	// Attach the propagated principals as Nexus headers. The handler frontend
+	// strips any inbound principal headers from external callers before
+	// authorization, then re-derives from the Authorizer; this ensures the
+	// only path by which a Principal can survive ingress is via the
+	// server-to-server caller-side write here. The pair we send is the
+	// pair captured at schedule time on the chasm Operation component.
+	attachPrincipalHeaders(header, args.serviceCallerPrincipal, args.endUserCallerPrincipal)
 
 	callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()

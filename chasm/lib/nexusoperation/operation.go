@@ -121,11 +121,21 @@ func newStandaloneOperation(
 		ScheduledTime:          timestamppb.New(ctx.Now(nil)),
 		RequestId:              uuid.NewString(),
 	})
+	// Capture the inbound RPC's principal as both the service caller and
+	// the end-user principal: for standalone Nexus operations the SDK
+	// client that invoked us is both the immediate caller and the
+	// originator. The auth interceptor wrote the principal headers onto
+	// the gRPC incoming metadata (and stripped any spoofed inbound
+	// values), so reading them via the chasm context's RequestHeader is
+	// safe.
+	callerPrincipal := principalFromChasmContext(ctx)
 	op.RequestData = chasm.NewDataField(ctx, &nexusoperationpb.OperationRequestData{
-		Input:        frontendReq.GetInput(),
-		NexusHeader:  frontendReq.GetNexusHeader(),
-		UserMetadata: frontendReq.GetUserMetadata(),
-		Identity:     frontendReq.GetIdentity(),
+		Input:                  frontendReq.GetInput(),
+		NexusHeader:            frontendReq.GetNexusHeader(),
+		UserMetadata:           frontendReq.GetUserMetadata(),
+		Identity:               frontendReq.GetIdentity(),
+		ServiceCallerPrincipal: callerPrincipal,
+		EndUserCallerPrincipal: callerPrincipal,
 	})
 	op.Visibility = chasm.NewComponentField(ctx, chasm.NewVisibilityWithData(
 		ctx,
@@ -289,6 +299,13 @@ func (o *Operation) loadStartArgs(
 	var (
 		invocationData InvocationData
 		err            error
+		// Principals captured at schedule time. Populated only when
+		// RequestData is in use (standalone Nexus operations). Workflow-
+		// initiated operations route through the InvocationStore branch
+		// where principals aren't yet bridged; leaving these nil is the
+		// graceful-degradation case for that path.
+		serviceCaller *commonpb.Principal
+		endUserCaller *commonpb.Principal
 	)
 	if store, ok := o.Store.TryGet(ctx); ok {
 		invocationData, err = store.NexusOperationInvocationData(ctx, o)
@@ -301,6 +318,8 @@ func (o *Operation) loadStartArgs(
 			Input:  requestData.GetInput(),
 			Header: requestData.GetNexusHeader(),
 		}
+		serviceCaller = requestData.GetServiceCallerPrincipal()
+		endUserCaller = requestData.GetEndUserCallerPrincipal()
 	}
 	invocationData.NexusLinks = append(invocationData.NexusLinks,
 		commonnexus.ConvertLinkNexusOperationToNexusLink(&commonpb.Link_NexusOperation{
@@ -329,6 +348,8 @@ func (o *Operation) loadStartArgs(
 		header:                 invocationData.Header,
 		nexusLinks:             invocationData.NexusLinks,
 		serializedRef:          serializedRef,
+		serviceCallerPrincipal: serviceCaller,
+		endUserCallerPrincipal: endUserCaller,
 	}, nil
 }
 
