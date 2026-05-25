@@ -689,13 +689,30 @@ func (x *CancellationState) GetReason() string {
 }
 
 type OperationRequestData struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Input         *v11.Payload           `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
-	NexusHeader   map[string]string      `protobuf:"bytes,2,rep,name=nexus_header,json=nexusHeader,proto3" json:"nexus_header,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	UserMetadata  *v12.UserMetadata      `protobuf:"bytes,3,opt,name=user_metadata,json=userMetadata,proto3" json:"user_metadata,omitempty"`
-	Identity      string                 `protobuf:"bytes,4,opt,name=identity,proto3" json:"identity,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Input        *v11.Payload           `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
+	NexusHeader  map[string]string      `protobuf:"bytes,2,rep,name=nexus_header,json=nexusHeader,proto3" json:"nexus_header,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	UserMetadata *v12.UserMetadata      `protobuf:"bytes,3,opt,name=user_metadata,json=userMetadata,proto3" json:"user_metadata,omitempty"`
+	Identity     string                 `protobuf:"bytes,4,opt,name=identity,proto3" json:"identity,omitempty"`
+	// Principal of the immediate caller that scheduled this Nexus operation,
+	// captured at schedule time from the inbound RPC's authenticated context.
+	// For workflow-initiated operations this is the worker's service-account
+	// principal; for standalone Nexus operations this is the SDK client's.
+	//
+	// Server-set, immutable from user code. Propagated as metadata on the
+	// outbound HTTP dispatch so the handler frontend can authorize on the
+	// immediate caller.
+	ServiceCallerPrincipal *v11.Principal `protobuf:"bytes,5,opt,name=service_caller_principal,json=serviceCallerPrincipal,proto3" json:"service_caller_principal,omitempty"`
+	// Principal that originated this workflow chain at the edge (captured
+	// from the root workflow's WorkflowExecutionInfo.RootCallerPrincipal at
+	// schedule time). Propagated alongside the service caller principal so
+	// the handler can audit and authorize on the end-user identity.
+	//
+	// Nil when no end-user principal is available (e.g. workflow started
+	// before the field existed, or chain broken at an activity boundary).
+	EndUserCallerPrincipal *v11.Principal `protobuf:"bytes,6,opt,name=end_user_caller_principal,json=endUserCallerPrincipal,proto3" json:"end_user_caller_principal,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *OperationRequestData) Reset() {
@@ -754,6 +771,20 @@ func (x *OperationRequestData) GetIdentity() string {
 		return x.Identity
 	}
 	return ""
+}
+
+func (x *OperationRequestData) GetServiceCallerPrincipal() *v11.Principal {
+	if x != nil {
+		return x.ServiceCallerPrincipal
+	}
+	return nil
+}
+
+func (x *OperationRequestData) GetEndUserCallerPrincipal() *v11.Principal {
+	if x != nil {
+		return x.EndUserCallerPrincipal
+	}
+	return nil
 }
 
 type OperationOutcome_Successful struct {
@@ -902,12 +933,14 @@ const file_temporal_server_chasm_lib_nexusoperation_proto_v1_operation_proto_raw
 	"request_id\x18\b \x01(\tR\trequestId\x12\x1a\n" +
 	"\bidentity\x18\t \x01(\tR\bidentity\x12\x16\n" +
 	"\x06reason\x18\n" +
-	" \x01(\tR\x06reason\"\xee\x02\n" +
+	" \x01(\tR\x06reason\"\xa9\x04\n" +
 	"\x14OperationRequestData\x125\n" +
 	"\x05input\x18\x01 \x01(\v2\x1f.temporal.api.common.v1.PayloadR\x05input\x12{\n" +
 	"\fnexus_header\x18\x02 \x03(\v2X.temporal.server.chasm.lib.nexusoperation.proto.v1.OperationRequestData.NexusHeaderEntryR\vnexusHeader\x12F\n" +
 	"\ruser_metadata\x18\x03 \x01(\v2!.temporal.api.sdk.v1.UserMetadataR\fuserMetadata\x12\x1a\n" +
-	"\bidentity\x18\x04 \x01(\tR\bidentity\x1a>\n" +
+	"\bidentity\x18\x04 \x01(\tR\bidentity\x12[\n" +
+	"\x18service_caller_principal\x18\x05 \x01(\v2!.temporal.api.common.v1.PrincipalR\x16serviceCallerPrincipal\x12\\\n" +
+	"\x19end_user_caller_principal\x18\x06 \x01(\v2!.temporal.api.common.v1.PrincipalR\x16endUserCallerPrincipal\x1a>\n" +
 	"\x10NexusHeaderEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xb0\x02\n" +
@@ -962,6 +995,7 @@ var file_temporal_server_chasm_lib_nexusoperation_proto_v1_operation_proto_goTyp
 	(*v11.Link)(nil),                     // 14: temporal.api.common.v1.Link
 	(*v11.Payload)(nil),                  // 15: temporal.api.common.v1.Payload
 	(*v12.UserMetadata)(nil),             // 16: temporal.api.sdk.v1.UserMetadata
+	(*v11.Principal)(nil),                // 17: temporal.api.common.v1.Principal
 }
 var file_temporal_server_chasm_lib_nexusoperation_proto_v1_operation_proto_depIdxs = []int32{
 	0,  // 0: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationState.status:type_name -> temporal.server.chasm.lib.nexusoperation.proto.v1.OperationStatus
@@ -988,13 +1022,15 @@ var file_temporal_server_chasm_lib_nexusoperation_proto_v1_operation_proto_depId
 	15, // 21: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationRequestData.input:type_name -> temporal.api.common.v1.Payload
 	9,  // 22: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationRequestData.nexus_header:type_name -> temporal.server.chasm.lib.nexusoperation.proto.v1.OperationRequestData.NexusHeaderEntry
 	16, // 23: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationRequestData.user_metadata:type_name -> temporal.api.sdk.v1.UserMetadata
-	15, // 24: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationOutcome.Successful.result:type_name -> temporal.api.common.v1.Payload
-	13, // 25: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationOutcome.Failed.failure:type_name -> temporal.api.failure.v1.Failure
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	17, // 24: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationRequestData.service_caller_principal:type_name -> temporal.api.common.v1.Principal
+	17, // 25: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationRequestData.end_user_caller_principal:type_name -> temporal.api.common.v1.Principal
+	15, // 26: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationOutcome.Successful.result:type_name -> temporal.api.common.v1.Payload
+	13, // 27: temporal.server.chasm.lib.nexusoperation.proto.v1.OperationOutcome.Failed.failure:type_name -> temporal.api.failure.v1.Failure
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_nexusoperation_proto_v1_operation_proto_init() }

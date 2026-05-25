@@ -146,4 +146,23 @@ message OperationRequestData {
   map<string, string> nexus_header = 2;
   temporal.api.sdk.v1.UserMetadata user_metadata = 3;
   string identity = 4;
+
+  // Principal of the immediate caller that scheduled this Nexus operation,
+  // captured at schedule time from the inbound RPC's authenticated context.
+  // For workflow-initiated operations this is the worker's service-account
+  // principal; for standalone Nexus operations this is the SDK client's.
+  //
+  // Server-set, immutable from user code. Propagated as metadata on the
+  // outbound HTTP dispatch so the handler frontend can authorize on the
+  // immediate caller.
+  temporal.api.common.v1.Principal service_caller_principal = 5;
+
+  // Principal that originated this workflow chain at the edge (captured
+  // from the root workflow's WorkflowExecutionInfo.RootCallerPrincipal at
+  // schedule time). Propagated alongside the service caller principal so
+  // the handler can audit and authorize on the end-user identity.
+  //
+  // Nil when no end-user principal is available (e.g. workflow started
+  // before the field existed, or chain broken at an activity boundary).
+  temporal.api.common.v1.Principal end_user_caller_principal = 6;
 }

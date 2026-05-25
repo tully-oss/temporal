@@ -318,6 +318,21 @@ message WorkflowExecutionInfo {
 
   // Time skipping info that contains the config and runtime history of the time skipping for the workflow.
   TimeSkippingInfo time_skipping_info = 115;
+
+  // Principal of the end-user who originated this workflow chain at the edge
+  // (e.g. the API key holder who started the root workflow). For top-level
+  // starts this is the principal derived from the inbound StartWorkflow RPC's
+  // authenticated context; for child workflows it is copied from the parent
+  // workflow's root_caller_principal so the chain of identity is preserved
+  // without walking history at every Nexus dispatch.
+  //
+  // This is the source of the end-user caller principal propagated on
+  // outbound Nexus operations. It is server-set; user code cannot influence
+  // it.
+  //
+  // Nil for workflows started before this field existed; consumers must
+  // tolerate absence and fall back to no end-user principal propagation.
+  temporal.api.common.v1.Principal root_caller_principal = 116;
 }
 
 message TimeSkippingInfo {

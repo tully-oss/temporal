@@ -7678,6 +7678,20 @@ func (ms *MutableStateImpl) closeTransaction(
 				if event.Principal == nil {
 					event.Principal = principal
 				}
+				// Cache the root-caller principal on the workflow's executionInfo
+				// when the chain originates here. For top-level workflows the
+				// inbound RPC's principal IS the end-user; for child workflows
+				// (event.ParentWorkflowExecution != nil) the chain must instead
+				// be inherited from the parent — handled when the parent invokes
+				// AddStartChildWorkflowExecutionInitiatedEvent. We only set the
+				// field on the root start so a later overwrite from a worker
+				// principal cannot clobber the originating identity.
+				if startAttr := event.GetWorkflowExecutionStartedEventAttributes(); startAttr != nil &&
+					startAttr.GetParentWorkflowExecution() == nil &&
+					ms.executionInfo.RootCallerPrincipal == nil &&
+					principal != nil {
+					ms.executionInfo.RootCallerPrincipal = principal
+				}
 			}
 		}
 		for _, event := range bufferEvents {
