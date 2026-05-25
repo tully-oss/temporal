@@ -15,6 +15,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/authorization"
 	"go.temporal.io/server/common/cluster"
+	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
@@ -119,6 +120,12 @@ func (h *NexusOperationHTTPHandler) writeFailure(writer http.ResponseWriter, r *
 
 // Handler for [nexushttp.RouteSet.DispatchNexusTaskByNamespaceAndTaskQueue].
 func (h *NexusOperationHTTPHandler) dispatchNexusTaskByNamespaceAndTaskQueue(w http.ResponseWriter, r *http.Request) {
+	// Strip principal-bearing HTTP headers before any handler code observes
+	// them. The caller-side server is the only authorized writer of these
+	// headers; if they arrived from an external caller they must be discarded
+	// before authorization, otherwise the trust model breaks.
+	headers.StripPrincipalHTTP(r.Header)
+
 	var err error
 	nc := h.baseNexusContext(configs.DispatchNexusTaskByNamespaceAndTaskQueueAPIName, r.Header)
 	params := prepareRequest(commonnexus.RouteDispatchNexusTaskByNamespaceAndTaskQueue, w, r)
@@ -159,6 +166,10 @@ func (h *NexusOperationHTTPHandler) dispatchNexusTaskByNamespaceAndTaskQueue(w h
 
 // Handler for [nexushttp.RouteSet.DispatchNexusTaskByEndpoint].
 func (h *NexusOperationHTTPHandler) dispatchNexusTaskByEndpoint(w http.ResponseWriter, r *http.Request) {
+	// Strip principal-bearing HTTP headers before any handler code observes
+	// them. See dispatchNexusTaskByNamespaceAndTaskQueue for rationale.
+	headers.StripPrincipalHTTP(r.Header)
+
 	endpointIDEscaped := prepareRequest(commonnexus.RouteDispatchNexusTaskByEndpoint, w, r)
 
 	endpointID, err := url.PathUnescape(endpointIDEscaped)
