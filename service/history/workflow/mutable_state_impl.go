@@ -707,14 +707,21 @@ func (ms *MutableStateImpl) ChasmWorkflowComponent(ctx context.Context) (*chasmw
 
 func (ms *MutableStateImpl) EnsureChasmWorkflowComponent(ctx context.Context) {
 	// Initialize chasm tree once for new workflows.
-	// Using context.Background() because this is done outside an actual request context and the
-	// chasmworkflow.NewWorkflow does not actually use it currently.
 	root, ok := ms.chasmTree.(*chasm.Node)
 	softassert.That(ms.logger, ok, "chasmTree cast failed")
 
 	if root.ArchetypeID() == chasm.UnspecifiedArchetypeID {
 		mutableContext := chasm.NewMutableContext(ctx, root)
-		if err := root.SetRootComponent(chasmworkflow.NewWorkflow(mutableContext, chasm.NewMSPointer(ms))); err != nil {
+		// For top-level workflow starts the inbound RPC's authorizer-derived
+		// principal is on the request context as gRPC metadata and represents
+		// this workflow chain's originator. For child workflows and
+		// continue-as-new the caller (StartChildWorkflowExecution /
+		// ContinueAsNewWorkflowExecution command handler) must pre-populate
+		// the request context with the parent's RootCallerPrincipal so the
+		// chain's identity is preserved across hops. See applyContinueAsNew
+		// and the child workflow start path for those overrides.
+		rootCallerPrincipal := headers.GetPrincipal(ctx)
+		if err := root.SetRootComponent(chasmworkflow.NewWorkflow(mutableContext, chasm.NewMSPointer(ms), rootCallerPrincipal)); err != nil {
 			softassert.Fail(ms.logger, "SetRootComponent failed", tag.Error(err))
 		}
 	}
@@ -7678,20 +7685,13 @@ func (ms *MutableStateImpl) closeTransaction(
 				if event.Principal == nil {
 					event.Principal = principal
 				}
-				// Cache the root-caller principal on the workflow's executionInfo
-				// when the chain originates here. For top-level workflows the
-				// inbound RPC's principal IS the end-user; for child workflows
-				// (event.ParentWorkflowExecution != nil) the chain must instead
-				// be inherited from the parent — handled when the parent invokes
-				// AddStartChildWorkflowExecutionInitiatedEvent. We only set the
-				// field on the root start so a later overwrite from a worker
-				// principal cannot clobber the originating identity.
-				if startAttr := event.GetWorkflowExecutionStartedEventAttributes(); startAttr != nil &&
-					startAttr.GetParentWorkflowExecution() == nil &&
-					ms.executionInfo.RootCallerPrincipal == nil &&
-					principal != nil {
-					ms.executionInfo.RootCallerPrincipal = principal
-				}
+				// The chain-originating principal (RootCallerPrincipal) is
+				// now stored on the chasm Workflow component rather than
+				// on WorkflowExecutionInfo. See
+				// chasm/lib/workflow.NewWorkflow — it captures the inbound
+				// RPC's principal at component creation time, and child /
+				// continue-as-new paths inherit from their predecessor.
+				// No additional stamping work is needed here.
 			}
 		}
 		for _, event := range bufferEvents {
