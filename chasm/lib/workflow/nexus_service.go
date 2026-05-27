@@ -21,8 +21,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var ErrSignalWithStartOperationDisabled = serviceerror.NewUnimplemented("SignalWithStart operation is disabled")
-var ErrGetWorkflowExecutionResultOperationDisabled = serviceerror.NewUnimplemented("GetWorkflowExecutionResult operation is disabled")
+var (
+	ErrSignalWithStartOperationDisabled            = serviceerror.NewUnimplemented("SignalWithStart operation is disabled")
+	ErrGetWorkflowExecutionResultOperationDisabled = serviceerror.NewUnimplemented("GetWorkflowExecutionResult operation is disabled")
+)
 
 type workflowServiceNexusHandler struct {
 	config            Config
@@ -30,20 +32,33 @@ type workflowServiceNexusHandler struct {
 	historyHandler    historyservice.HistoryServiceServer
 }
 
-// signalWithStartWorkflowExecution implements the SignalWithStartWorkflowExecution Nexus operation.
-func (h *workflowServiceNexusHandler) signalWithStartWorkflowExecution(
+// signalWithStartHandler implements the SignalWithStartWorkflowExecution Nexus operation as a
+// sync op: Start does the work inline and returns a synchronous result.
+type signalWithStartHandler struct {
+	nexus.UnimplementedOperation[
+		*workflowservice.SignalWithStartWorkflowExecutionRequest,
+		*workflowservice.SignalWithStartWorkflowExecutionResponse,
+	]
+	h *workflowServiceNexusHandler
+}
+
+func (*signalWithStartHandler) Name() string {
+	return workflowservicenexus.WorkflowService.SignalWithStartWorkflowExecution.Name()
+}
+
+func (s *signalWithStartHandler) Start(
 	ctx context.Context,
 	req *workflowservice.SignalWithStartWorkflowExecutionRequest,
-	options nexus.StartOperationOptions,
-) (*workflowservice.SignalWithStartWorkflowExecutionResponse, error) {
-	if !h.config.enableSignalWithStartFromWorkflow(req.GetNamespace()) {
+	_ nexus.StartOperationOptions,
+) (nexus.HandlerStartOperationResult[*workflowservice.SignalWithStartWorkflowExecutionResponse], error) {
+	if !s.h.config.enableSignalWithStartFromWorkflow(req.GetNamespace()) {
 		return nil, ErrSignalWithStartOperationDisabled
 	}
-	nsID, err := h.namespaceRegistry.GetNamespaceID(namespace.Name(req.GetNamespace()))
+	nsID, err := s.h.namespaceRegistry.GetNamespaceID(namespace.Name(req.GetNamespace()))
 	if err != nil {
 		return nil, serviceerror.NewInvalidArgumentf("Invalid namespace %q: %v", req.GetNamespace(), err)
 	}
-	res, err := h.historyHandler.SignalWithStartWorkflowExecution(ctx, &historyservice.SignalWithStartWorkflowExecutionRequest{
+	res, err := s.h.historyHandler.SignalWithStartWorkflowExecution(ctx, &historyservice.SignalWithStartWorkflowExecutionRequest{
 		NamespaceId:            nsID.String(),
 		SignalWithStartRequest: req,
 	})
@@ -61,9 +76,11 @@ func (h *workflowServiceNexusHandler) signalWithStartWorkflowExecution(
 		},
 	})
 	nexus.AddHandlerLinks(ctx, link)
-	return &workflowservice.SignalWithStartWorkflowExecutionResponse{
-		RunId:   res.GetRunId(),
-		Started: res.GetStarted(),
+	return &nexus.HandlerStartOperationResultSync[*workflowservice.SignalWithStartWorkflowExecutionResponse]{
+		Value: &workflowservice.SignalWithStartWorkflowExecutionResponse{
+			RunId:   res.GetRunId(),
+			Started: res.GetStarted(),
+		},
 	}, nil
 }
 
@@ -220,10 +237,7 @@ func mustNewWorkflowServiceNexusHandler(
 	handler *workflowServiceNexusHandler,
 ) *nexus.Service {
 	svc := nexus.NewService(workflowservicenexus.WorkflowService.ServiceName)
-	svc.MustRegister(nexus.NewSyncOperation(
-		workflowservicenexus.WorkflowService.SignalWithStartWorkflowExecution.Name(),
-		handler.signalWithStartWorkflowExecution,
-	))
+	svc.MustRegister(&signalWithStartHandler{h: handler})
 	svc.MustRegister(&getWorkflowExecutionResultHandler{h: handler})
 	return svc
 }
