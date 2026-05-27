@@ -31,10 +31,22 @@ const (
 
 	// End-user principal: the identity that originated the request at the
 	// edge (e.g. the API key holder who started the root workflow that
-	// eventually scheduled this Nexus operation). Propagated alongside the
-	// immediate-caller principal across server-trusted hops. Distinct
-	// header pair so that the two principals can be carried together
-	// without conflict.
+	// eventually scheduled this Nexus operation).
+	//
+	// Unlike the immediate-caller principal trio, end-user headers are NOT
+	// added to propagateHeaders. End-user identity lives at rest on the
+	// workflow's CHASM RootCallerPrincipal and is looked up at the moment
+	// of need (specifically: when the chasm Nexus operation dispatch task
+	// attaches it to the outbound HTTP request). Propagating it on every
+	// internal gRPC hop would pay a per-RPC cost for a benefit no
+	// downstream consumer needs — they all read from CHASM state, not
+	// from gRPC metadata.
+	//
+	// The trio is still in principalHeaderNames so strip-on-ingress
+	// removes any spoofed values, and SetEndUserPrincipal /
+	// GetEndUserPrincipal helpers are still used at the Nexus dispatch
+	// HTTP boundary (write on caller side, read on handler side after
+	// trust verification).
 	EndUserPrincipalTypeHeaderName    = "temporal-end-user-principal-type"
 	EndUserPrincipalNameHeaderName    = "temporal-end-user-principal-name"
 	EndUserPrincipalAccountHeaderName = "temporal-end-user-principal-account"
@@ -43,7 +55,9 @@ const (
 )
 
 var (
-	// propagateHeaders are the headers to propagate from the frontend to other services.
+	// propagateHeaders are the headers to propagate from the frontend to
+	// other services via gRPC metadata. End-user principal headers are
+	// intentionally absent — see EndUserPrincipalTypeHeaderName comment.
 	propagateHeaders = []string{
 		ClientNameHeaderName,
 		ClientVersionHeaderName,
@@ -55,15 +69,14 @@ var (
 		PrincipalTypeHeaderName,
 		PrincipalNameHeaderName,
 		PrincipalAccountHeaderName,
-		EndUserPrincipalTypeHeaderName,
-		EndUserPrincipalNameHeaderName,
-		EndUserPrincipalAccountHeaderName,
 	}
 
 	// principalHeaderNames is the set of headers that must be stripped from
-	// inbound metadata to prevent external callers from spoofing identity.
-	// Any new principal-carrying header must be added here in addition to
-	// propagateHeaders.
+	// inbound metadata / HTTP requests to prevent external callers from
+	// spoofing identity. Includes both immediate-caller and end-user trios
+	// even though the end-user trio is not in propagateHeaders: it can
+	// arrive on the Nexus dispatch HTTP boundary, and any external attempt
+	// to inject it at a gRPC ingress must still be removed.
 	principalHeaderNames = []string{
 		PrincipalTypeHeaderName,
 		PrincipalNameHeaderName,

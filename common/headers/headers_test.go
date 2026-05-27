@@ -275,7 +275,33 @@ func TestStripPrincipal_RemovesBothPrincipalPairs(t *testing.T) {
 	require.Equal(t, "legitimate-client", md.Get(ClientNameHeaderName)[0])
 }
 
-func TestPropagate_CarriesAllPrincipalHeaders(t *testing.T) {
+func TestPropagate_CarriesImmediateCallerPrincipal(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ctx = metadata.NewIncomingContext(ctx, metadata.New(map[string]string{
+		PrincipalTypeHeaderName:    "service-accounts",
+		PrincipalNameHeaderName:    "sa-worker",
+		PrincipalAccountHeaderName: "12345",
+	}))
+
+	ctx = Propagate(ctx)
+
+	md, ok := metadata.FromOutgoingContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, "service-accounts", md.Get(PrincipalTypeHeaderName)[0])
+	require.Equal(t, "sa-worker", md.Get(PrincipalNameHeaderName)[0])
+	require.Equal(t, "12345", md.Get(PrincipalAccountHeaderName)[0])
+}
+
+// End-user principal headers are intentionally not auto-propagated via
+// gRPC metadata — end-user identity lives at rest on the workflow's
+// CHASM RootCallerPrincipal and is read at the moment of need
+// (specifically, when the chasm Nexus operation dispatch task attaches
+// it to the outbound HTTP request). This test pins that behavior so a
+// future change to propagateHeaders can't silently re-introduce the
+// trio.
+func TestPropagate_DoesNotCarryEndUserPrincipal(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -292,10 +318,14 @@ func TestPropagate_CarriesAllPrincipalHeaders(t *testing.T) {
 
 	md, ok := metadata.FromOutgoingContext(ctx)
 	require.True(t, ok)
+
+	// Immediate-caller trio is propagated.
 	require.Equal(t, "service-accounts", md.Get(PrincipalTypeHeaderName)[0])
 	require.Equal(t, "sa-worker", md.Get(PrincipalNameHeaderName)[0])
 	require.Equal(t, "12345", md.Get(PrincipalAccountHeaderName)[0])
-	require.Equal(t, "users", md.Get(EndUserPrincipalTypeHeaderName)[0])
-	require.Equal(t, "alice", md.Get(EndUserPrincipalNameHeaderName)[0])
-	require.Equal(t, "12345", md.Get(EndUserPrincipalAccountHeaderName)[0])
+
+	// End-user trio must not be auto-propagated by Propagate.
+	require.Empty(t, md.Get(EndUserPrincipalTypeHeaderName))
+	require.Empty(t, md.Get(EndUserPrincipalNameHeaderName))
+	require.Empty(t, md.Get(EndUserPrincipalAccountHeaderName))
 }
