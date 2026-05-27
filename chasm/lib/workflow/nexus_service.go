@@ -5,11 +5,11 @@ import (
 	"errors"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
+	"go.temporal.io/api/applicationservice/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/api/workflownexusservice/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/api/workflowservice/v1/workflowservicenexus"
 	"go.temporal.io/server/api/historyservice/v1"
@@ -43,7 +43,7 @@ type signalWithStartHandler struct {
 }
 
 func (*signalWithStartHandler) Name() string {
-	return workflowservicenexus.WorkflowService.SignalWithStartWorkflowExecution.Name()
+	return workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.SignalWithStartWorkflowExecution.Name()
 }
 
 func (s *signalWithStartHandler) Start(
@@ -86,8 +86,8 @@ func (s *signalWithStartHandler) Start(
 
 type getWorkflowExecutionResultHandler struct {
 	nexus.UnimplementedOperation[
-		*workflownexusservice.GetWorkflowExecutionResultRequest,
-		*workflownexusservice.GetWorkflowExecutionResultResponse,
+		*applicationservice.GetWorkflowExecutionResultRequest,
+		*applicationservice.GetWorkflowExecutionResultResponse,
 	]
 	h *workflowServiceNexusHandler
 }
@@ -95,8 +95,8 @@ type getWorkflowExecutionResultHandler struct {
 func (w *getWorkflowExecutionResultHandler) getTerminalState(
 	ctx context.Context,
 	namespaceID string,
-	req *workflownexusservice.GetWorkflowExecutionResultRequest,
-) (*workflownexusservice.GetWorkflowExecutionResultResponse, error) {
+	req *applicationservice.GetWorkflowExecutionResultRequest,
+) (*applicationservice.GetWorkflowExecutionResultResponse, error) {
 	res, err := w.h.historyHandler.GetWorkflowExecutionHistory(ctx, &historyservice.GetWorkflowExecutionHistoryRequest{
 		NamespaceId: namespaceID,
 		Request: &workflowservice.GetWorkflowExecutionHistoryRequest{
@@ -135,34 +135,34 @@ func (w *getWorkflowExecutionResultHandler) getTerminalState(
 		if len(payloads) > 0 {
 			result = payloads[0]
 		}
-		return &workflownexusservice.GetWorkflowExecutionResultResponse{
+		return &applicationservice.GetWorkflowExecutionResultResponse{
 			Status: enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
-			CompletionStatus: &workflownexusservice.GetWorkflowExecutionResultResponse_Result{
+			CompletionStatus: &applicationservice.GetWorkflowExecutionResultResponse_Result{
 				Result: result,
 			},
 		}, nil
 	case enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_FAILED:
 		attrs := closeEvent.GetWorkflowExecutionFailedEventAttributes()
-		return &workflownexusservice.GetWorkflowExecutionResultResponse{
+		return &applicationservice.GetWorkflowExecutionResultResponse{
 			Status: enumspb.WORKFLOW_EXECUTION_STATUS_FAILED,
-			CompletionStatus: &workflownexusservice.GetWorkflowExecutionResultResponse_Failure{
+			CompletionStatus: &applicationservice.GetWorkflowExecutionResultResponse_Failure{
 				Failure: attrs.GetFailure(),
 			},
 		}, nil
 	case enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_TIMED_OUT:
-		return &workflownexusservice.GetWorkflowExecutionResultResponse{
+		return &applicationservice.GetWorkflowExecutionResultResponse{
 			Status: enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
 		}, nil
 	case enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_CANCELED:
-		return &workflownexusservice.GetWorkflowExecutionResultResponse{
+		return &applicationservice.GetWorkflowExecutionResultResponse{
 			Status: enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED,
 		}, nil
 	case enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_TERMINATED:
-		return &workflownexusservice.GetWorkflowExecutionResultResponse{
+		return &applicationservice.GetWorkflowExecutionResultResponse{
 			Status: enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED,
 		}, nil
 	case enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_CONTINUED_AS_NEW:
-		return &workflownexusservice.GetWorkflowExecutionResultResponse{
+		return &applicationservice.GetWorkflowExecutionResultResponse{
 			Status: enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW,
 		}, nil
 	default:
@@ -171,14 +171,14 @@ func (w *getWorkflowExecutionResultHandler) getTerminalState(
 }
 
 func (*getWorkflowExecutionResultHandler) Name() string {
-	return workflowservicenexus.WorkflowNexusService.GetWorkflowExecutionResult.Name()
+	return workflowservicenexus.TemporalAPIApplicationserviceV1ApplicationService.GetWorkflowExecutionResult.Name()
 }
 
 func (w *getWorkflowExecutionResultHandler) Start(
 	ctx context.Context,
-	req *workflownexusservice.GetWorkflowExecutionResultRequest,
+	req *applicationservice.GetWorkflowExecutionResultRequest,
 	opts nexus.StartOperationOptions,
-) (nexus.HandlerStartOperationResult[*workflownexusservice.GetWorkflowExecutionResultResponse], error) {
+) (nexus.HandlerStartOperationResult[*applicationservice.GetWorkflowExecutionResultResponse], error) {
 	if !w.h.config.enableGetWorkflowExecutionResult(req.GetNamespace()) {
 		return nil, ErrGetWorkflowExecutionResultOperationDisabled
 	}
@@ -224,7 +224,7 @@ func (w *getWorkflowExecutionResultHandler) Start(
 			if err != nil {
 				return nil, err
 			}
-			return &nexus.HandlerStartOperationResultSync[*workflownexusservice.GetWorkflowExecutionResultResponse]{
+			return &nexus.HandlerStartOperationResultSync[*applicationservice.GetWorkflowExecutionResultResponse]{
 				Value: result,
 			}, nil
 		}
@@ -235,11 +235,12 @@ func (w *getWorkflowExecutionResultHandler) Start(
 
 func mustNewWorkflowServiceNexusHandler(
 	handler *workflowServiceNexusHandler,
-) *nexus.Service {
-	svc := nexus.NewService(workflowservicenexus.WorkflowService.ServiceName)
+) []*nexus.Service {
+	svc := nexus.NewService(workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName)
 	svc.MustRegister(&signalWithStartHandler{h: handler})
-	svc.MustRegister(&getWorkflowExecutionResultHandler{h: handler})
-	return svc
+	appSvc := nexus.NewService(workflowservicenexus.TemporalAPIApplicationserviceV1ApplicationService.ServiceName)
+	appSvc.MustRegister(&getWorkflowExecutionResultHandler{h: handler})
+	return []*nexus.Service{svc, appSvc}
 }
 
 func (h *workflowServiceNexusHandler) setHistoryHandler(handler historyservice.HistoryServiceServer) {
@@ -252,7 +253,7 @@ type GetWorkflowExecutionResultProcessor struct {
 
 func (o GetWorkflowExecutionResultProcessor) ProcessInput(
 	ctx chasm.NexusOperationProcessorContext,
-	request *workflownexusservice.GetWorkflowExecutionResultRequest,
+	request *applicationservice.GetWorkflowExecutionResultRequest,
 ) (*chasm.NexusOperationProcessorResult, error) {
 	if request.GetNamespace() == "" {
 		request.Namespace = ctx.Namespace.Name().String()
@@ -328,16 +329,19 @@ func NewWorkflowServiceNexusServiceProcessor(
 	config Config,
 	saMapperProvider searchattribute.MapperProvider,
 	saValidator *searchattribute.Validator,
-) *chasm.NexusServiceProcessor {
-	sp := chasm.NewNexusServiceProcessor(workflowservicenexus.WorkflowService.ServiceName)
+) []*chasm.NexusServiceProcessor {
 	validator := NewValidator(config, saMapperProvider, saValidator)
-	sp.MustRegisterOperation(
-		workflowservicenexus.WorkflowService.SignalWithStartWorkflowExecution.Name(),
+	
+	workflowSp := chasm.NewNexusServiceProcessor(workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName)
+	workflowSp.MustRegisterOperation(
+		workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.SignalWithStartWorkflowExecution.Name(),
 		chasm.NewRegisterableNexusOperationProcessor(SignalWithStartOperationProcessor{validator: validator}),
 	)
-	sp.MustRegisterOperation(
-		workflowservicenexus.WorkflowNexusService.GetWorkflowExecutionResult.Name(),
+	
+	applicationSp := chasm.NewNexusServiceProcessor(workflowservicenexus.TemporalAPIApplicationserviceV1ApplicationService.ServiceName)
+	applicationSp.MustRegisterOperation(
+		workflowservicenexus.TemporalAPIApplicationserviceV1ApplicationService.GetWorkflowExecutionResult.Name(),
 		chasm.NewRegisterableNexusOperationProcessor(GetWorkflowExecutionResultProcessor{validator: validator}),
 	)
-	return sp
+	return []*chasm.NexusServiceProcessor{workflowSp, applicationSp}
 }

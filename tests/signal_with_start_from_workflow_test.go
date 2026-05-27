@@ -35,8 +35,8 @@ import (
 // target workflow. It is used by TestBothWorkflowsVisibleAfterSWSFromWorkflow to verify
 // end-to-end SDK serialization against the real server.
 func systemNexusSWSWorkflow(ctx workflow.Context, req *workflowservice.SignalWithStartWorkflowExecutionRequest) (string, error) {
-	nc := workflow.NewNexusClient(commonnexus.SystemEndpoint, workflowservicenexus.WorkflowService.ServiceName)
-	fut := nc.ExecuteOperation(ctx, workflowservicenexus.WorkflowService.SignalWithStartWorkflowExecution,
+	nc := workflow.NewNexusClient(commonnexus.SystemEndpoint, workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName)
+	fut := nc.ExecuteOperation(ctx, workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.SignalWithStartWorkflowExecution,
 		req,
 		workflow.NexusOperationOptions{})
 	var result workflowservice.SignalWithStartWorkflowExecutionResponse
@@ -110,8 +110,8 @@ func (s *SignalWithStartFromWorkflowTestSuite) scheduleAndGetSWSResult(
 				Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
 					ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
 						Endpoint:  commonnexus.SystemEndpoint,
-						Service:   "WorkflowService",
-						Operation: "SignalWithStartWorkflowExecution",
+						Service:   workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName,
+						Operation: workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.SignalWithStartWorkflowExecution.Name(),
 						Input:     payloads.MustEncodeSingle(swsReq),
 					},
 				},
@@ -213,8 +213,8 @@ func (s *SignalWithStartFromWorkflowTestSuite) TestHappyPath() {
 				Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
 					ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
 						Endpoint:  commonnexus.SystemEndpoint,
-						Service:   "WorkflowService",
-						Operation: "SignalWithStartWorkflowExecution",
+						Service:   workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName,
+						Operation: workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.SignalWithStartWorkflowExecution.Name(),
 						Input: payloads.MustEncodeSingle(&workflowservice.SignalWithStartWorkflowExecutionRequest{
 							WorkflowId: workflowID,
 							SignalName: "test-signal",
@@ -648,8 +648,8 @@ func (s *SignalWithStartFromWorkflowTestSuite) TestIDConflictPolicy_Fail() {
 				Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
 					ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
 						Endpoint:  commonnexus.SystemEndpoint,
-						Service:   "WorkflowService",
-						Operation: "SignalWithStartWorkflowExecution",
+						Service:   workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName,
+						Operation: workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.SignalWithStartWorkflowExecution.Name(),
 						Input:     payloads.MustEncodeSingle(swsReq),
 					},
 				},
@@ -826,8 +826,8 @@ func (s *SignalWithStartFromWorkflowTestSuite) TestBothWorkflowsVisibleAfterSWSF
 				Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
 					ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
 						Endpoint:  commonnexus.SystemEndpoint,
-						Service:   "WorkflowService",
-						Operation: "SignalWithStartWorkflowExecution",
+						Service:   workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName,
+						Operation: workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.SignalWithStartWorkflowExecution.Name(),
 						Input:     protoBinaryPayload,
 					},
 				},
