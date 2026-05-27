@@ -110,13 +110,14 @@ type (
 		CustomHistoryArchiverFactory    provider.CustomHistoryArchiverFactory
 		CustomVisibilityArchiverFactory provider.CustomVisibilityArchiverFactory
 
-		SearchAttributesMapper     searchattribute.Mapper
-		CustomFrontendInterceptors []grpc.UnaryServerInterceptor
-		Authorizer                 authorization.Authorizer
-		ClaimMapper                authorization.ClaimMapper
-		AudienceGetter             authorization.JWTAudienceMapper
-		TokenProvider              auth.TokenProvider
-		ServiceHosts               map[primitives.ServiceName]static.Hosts
+		SearchAttributesMapper           searchattribute.Mapper
+		CustomFrontendInterceptors       []grpc.UnaryServerInterceptor
+		CustomFrontendStreamInterceptors []grpc.StreamServerInterceptor
+		Authorizer                       authorization.Authorizer
+		ClaimMapper                      authorization.ClaimMapper
+		AudienceGetter                   authorization.JWTAudienceMapper
+		TokenProvider                    auth.TokenProvider
+		ServiceHosts                     map[primitives.ServiceName]static.Hosts
 
 		// below are things that could be over write by server options or may have default if not supplied by serverOptions.
 		Logger                log.Logger
@@ -125,6 +126,7 @@ type (
 		TLSConfigProvider     encryption.TLSConfigProvider
 		EsClient              esclient.Client
 		MetricsHandler        metrics.Handler
+		ServiceFxOptions      map[primitives.ServiceName][]fx.Option
 	}
 )
 
@@ -261,10 +263,10 @@ func ServerOptionsProvider(opts []ServerOption) (serverOptionsProvider, error) {
 		}
 	}
 
-	// check that when static hosts are defined, they are defined for all required hosts
+	// check that when static hosts are defined, they are defined for all requested hosts
 	if len(so.hostsByService) > 0 {
-		for _, service := range DefaultServices {
-			hosts := so.hostsByService[primitives.ServiceName(service)]
+		for service := range so.serviceNames {
+			hosts := so.hostsByService[service]
 			if len(hosts.All) == 0 {
 				return serverOptionsProvider{}, fmt.Errorf("%w: %v", missingServiceInStaticHosts, service)
 			}
@@ -301,12 +303,13 @@ func ServerOptionsProvider(opts []ServerOption) (serverOptionsProvider, error) {
 		CustomHistoryArchiverFactory:    so.customHistoryArchiverFactory,
 		CustomVisibilityArchiverFactory: so.customVisibilityArchiverFactory,
 
-		SearchAttributesMapper:     so.searchAttributesMapper,
-		CustomFrontendInterceptors: so.customFrontendInterceptors,
-		Authorizer:                 so.authorizer,
-		ClaimMapper:                so.claimMapper,
-		AudienceGetter:             so.audienceGetter,
-		TokenProvider:              so.tokenProvider,
+		SearchAttributesMapper:           so.searchAttributesMapper,
+		CustomFrontendInterceptors:       so.customFrontendInterceptors,
+		CustomFrontendStreamInterceptors: so.customFrontendStreamInterceptors,
+		Authorizer:                       so.authorizer,
+		ClaimMapper:                      so.claimMapper,
+		AudienceGetter:                   so.audienceGetter,
+		TokenProvider:                    so.tokenProvider,
 
 		Logger:                logger,
 		ClientFactoryProvider: clientFactoryProvider,
@@ -314,6 +317,7 @@ func ServerOptionsProvider(opts []ServerOption) (serverOptionsProvider, error) {
 		TLSConfigProvider:     tlsConfigProvider,
 		EsClient:              esClient,
 		MetricsHandler:        metricHandler,
+		ServiceFxOptions:      so.serviceFxOptions,
 	}, nil
 }
 
@@ -353,33 +357,35 @@ type (
 	ServiceProviderParamsCommon struct {
 		fx.In
 
-		Cfg                             *config.Config
-		ServiceNames                    resource.ServiceNames
-		Logger                          log.Logger
-		NamespaceLogger                 resource.NamespaceLogger
-		DynamicConfigClient             dynamicconfig.Client
-		MetricsHandler                  metrics.Handler
-		EsClient                        esclient.Client
-		TlsConfigProvider               encryption.TLSConfigProvider //nolint:staticcheck // should be TLSConfigProvider
-		PersistenceConfig               config.Persistence
-		ClusterMetadata                 *cluster.Config
-		ClientFactoryProvider           client.FactoryProvider
-		AudienceGetter                  authorization.JWTAudienceMapper
-		PersistenceServiceResolver      resolver.ServiceResolver
-		PersistenceFactoryProvider      persistenceClient.FactoryProviderFn
-		SearchAttributesMapper          searchattribute.Mapper
-		CustomFrontendInterceptors      []grpc.UnaryServerInterceptor
-		Authorizer                      authorization.Authorizer
-		ClaimMapper                     authorization.ClaimMapper
-		TokenProvider                   auth.TokenProvider
-		DataStoreFactory                persistenceClient.AbstractDataStoreFactory
-		VisibilityStoreFactory          visibility.VisibilityStoreFactory
-		CustomHistoryArchiverFactory    provider.CustomHistoryArchiverFactory
-		CustomVisibilityArchiverFactory provider.CustomVisibilityArchiverFactory
-		SpanExporters                   []otelsdktrace.SpanExporter
-		InstanceID                      resource.InstanceID                     `optional:"true"`
-		StaticServiceHosts              map[primitives.ServiceName]static.Hosts `optional:"true"`
-		TaskCategoryRegistry            tasks.TaskCategoryRegistry
+		Cfg                              *config.Config
+		ServiceNames                     resource.ServiceNames
+		Logger                           log.Logger
+		NamespaceLogger                  resource.NamespaceLogger
+		DynamicConfigClient              dynamicconfig.Client
+		MetricsHandler                   metrics.Handler
+		EsClient                         esclient.Client
+		TlsConfigProvider                encryption.TLSConfigProvider //nolint:staticcheck // should be TLSConfigProvider
+		PersistenceConfig                config.Persistence
+		ClusterMetadata                  *cluster.Config
+		ClientFactoryProvider            client.FactoryProvider
+		AudienceGetter                   authorization.JWTAudienceMapper
+		PersistenceServiceResolver       resolver.ServiceResolver
+		PersistenceFactoryProvider       persistenceClient.FactoryProviderFn
+		SearchAttributesMapper           searchattribute.Mapper
+		CustomFrontendInterceptors       []grpc.UnaryServerInterceptor
+		CustomFrontendStreamInterceptors []grpc.StreamServerInterceptor
+		Authorizer                       authorization.Authorizer
+		ClaimMapper                      authorization.ClaimMapper
+		TokenProvider                    auth.TokenProvider
+		DataStoreFactory                 persistenceClient.AbstractDataStoreFactory
+		VisibilityStoreFactory           visibility.VisibilityStoreFactory
+		CustomHistoryArchiverFactory     provider.CustomHistoryArchiverFactory
+		CustomVisibilityArchiverFactory  provider.CustomVisibilityArchiverFactory
+		SpanExporters                    []otelsdktrace.SpanExporter
+		InstanceID                       resource.InstanceID                     `optional:"true"`
+		StaticServiceHosts               map[primitives.ServiceName]static.Hosts `optional:"true"`
+		TaskCategoryRegistry             tasks.TaskCategoryRegistry
+		ServiceFxOptions                 map[primitives.ServiceName][]fx.Option
 	}
 )
 
@@ -510,6 +516,7 @@ func HistoryServiceProvider(
 		history.QueueModule,
 		history.Module,
 		replication.Module,
+		fx.Options(params.ServiceFxOptions[serviceName]...),
 	)
 
 	return NewService(app, serviceName, params.Logger), app.Err()
@@ -528,6 +535,7 @@ func MatchingServiceProvider(
 	app := fx.New(
 		params.GetCommonServiceOptions(serviceName),
 		matching.Module,
+		fx.Options(params.ServiceFxOptions[serviceName]...),
 	)
 
 	return NewService(app, serviceName, params.Logger), app.Err()
@@ -557,7 +565,7 @@ func genericFrontendServiceProvider(
 	app := fx.New(
 		params.GetCommonServiceOptions(serviceName),
 		fx.Supply(params.CustomFrontendInterceptors),
-		fx.Supply([]grpc.StreamServerInterceptor{}),
+		fx.Supply(params.CustomFrontendStreamInterceptors),
 		fx.Decorate(func() authorization.ClaimMapper {
 			switch serviceName {
 			case primitives.FrontendService:
@@ -578,6 +586,7 @@ func genericFrontendServiceProvider(
 			return log.With(params.Logger, tags...)
 		}),
 		frontend.Module,
+		fx.Options(params.ServiceFxOptions[serviceName]...),
 	)
 
 	return NewService(app, serviceName, params.Logger), app.Err()
@@ -596,6 +605,7 @@ func WorkerServiceProvider(
 	app := fx.New(
 		params.GetCommonServiceOptions(serviceName),
 		worker.Module,
+		fx.Options(params.ServiceFxOptions[serviceName]...),
 	)
 
 	return NewService(app, serviceName, params.Logger), app.Err()

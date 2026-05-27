@@ -22,6 +22,8 @@ var (
 	MatchingForwardTaskDelay                 = newKey[time.Duration, namespace.ID]()
 	HistoryReplicationTaskInterceptor        = newKey[func(*replicationspb.ReplicationTask, func() error) error, global]()
 	NamespaceReplicationTaskInterceptor      = newKey[func(context.Context, *replicationspb.NamespaceTaskAttributes, func() error) error, namespace.Name]()
+	HistoryTaskInterceptor                   = newKey[func(any) (any, bool), namespace.ID]()
+	HistoryTaskQueueBeforeDeleteTasks        = newKey[func(any) error, global]()
 )
 
 // keyID is a unique identifier for a key, used as a map key.

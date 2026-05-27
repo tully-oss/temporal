@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/urfave/cli/v2"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -29,16 +28,13 @@ import (
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/sdk"
-	"go.temporal.io/server/common/testing/await"
+	"go.temporal.io/server/common/testing/testhooks"
 	"go.temporal.io/server/service/history/queues"
 	"go.temporal.io/server/service/history/tasks"
 	"go.temporal.io/server/tests/testcore"
 	"go.temporal.io/server/tests/testutils"
 	"go.temporal.io/server/tools/tdbg"
 	"go.temporal.io/server/tools/tdbg/tdbgtest"
-	"go.uber.org/fx"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -47,11 +43,11 @@ type (
 	DLQSuite struct {
 		testcore.FunctionalTestBase
 
-		dlq              persistence.HistoryTaskQueueManager
-		writer           bytes.Buffer
-		sdkClientFactory sdk.ClientFactory
-		tdbgApp          *cli.App
-		deleteBlockCh    chan any
+		dlq           persistence.HistoryTaskQueueManager
+		dlqTasks      chan tasks.Task
+		writer        bytes.Buffer
+		tdbgApp       *cli.App
+		deleteBlockCh chan any
 
 		failingWorkflowIDPrefix atomic.Pointer[string]
 	}
@@ -66,17 +62,6 @@ type (
 		targetCluster       string
 		expectedNumMessages int
 	}
-	testExecutorWrapper struct {
-		suite *DLQSuite
-	}
-	testExecutor struct {
-		base  queues.Executor
-		suite *DLQSuite
-	}
-	testTaskQueueManager struct {
-		suite *DLQSuite
-		persistence.HistoryTaskQueueManager
-	}
 )
 
 const (
@@ -89,30 +74,11 @@ func TestDLQSuite(t *testing.T) {
 }
 
 func (s *DLQSuite) SetupSuite() {
+	s.dlqTasks = make(chan tasks.Task)
 	testPrefix := "dlq-test-terminal-wfts-"
 	s.failingWorkflowIDPrefix.Store(&testPrefix)
 	s.FunctionalTestBase.SetupSuiteWithCluster(
-		testcore.WithFxOptionsForService(primitives.HistoryService,
-			fx.Populate(&s.dlq),
-			fx.Provide(
-				func() queues.ExecutorWrapper {
-					return &testExecutorWrapper{
-						suite: s,
-					}
-				},
-			),
-			fx.Decorate(
-				func(m persistence.HistoryTaskQueueManager) persistence.HistoryTaskQueueManager {
-					return &testTaskQueueManager{
-						suite:                   s,
-						HistoryTaskQueueManager: m,
-					}
-				},
-			),
-		),
-		testcore.WithFxOptionsForService(primitives.FrontendService,
-			fx.Populate(&s.sdkClientFactory),
-		),
+		testcore.WithHistoryTaskQueueManagerCapture(&s.dlq),
 	)
 	s.tdbgApp = tdbgtest.NewCliApp(
 		func(params *tdbg.Params) {
@@ -133,6 +99,26 @@ func (s *DLQSuite) SetupTest() {
 
 	s.deleteBlockCh = make(chan any)
 	close(s.deleteBlockCh)
+	s.InjectHook(testhooks.NewHook(testhooks.HistoryTaskInterceptor, func(task any) (any, bool) {
+		switch task := task.(type) {
+		case queues.Executable:
+			if strings.HasPrefix(task.GetWorkflowID(), *s.failingWorkflowIDPrefix.Load()) && task.GetCategory() == tasks.CategoryTransfer {
+				return queues.ExecuteResponse{
+					ExecutionErr: serialization.NewDeserializationError(enumspb.ENCODING_TYPE_PROTO3, errors.New("test error")),
+				}, true
+			}
+		case tasks.Task:
+			select {
+			case s.dlqTasks <- task:
+			case <-s.T().Context().Done():
+			}
+		}
+		return nil, false
+	}))
+	s.InjectHook(testhooks.NewHook(testhooks.HistoryTaskQueueBeforeDeleteTasks, func(any) error {
+		<-s.deleteBlockCh
+		return nil
+	}))
 }
 
 func (s *DLQSuite) TestReadArtificialDLQTasks() {
@@ -423,19 +409,31 @@ func (s *DLQSuite) executeDoomedWorkflow(ctx context.Context) (sdkclient.Workflo
 	run := s.executeWorkflow(ctx, *s.failingWorkflowIDPrefix.Load()+uuid.NewString())
 
 	// Wait for the workflow task to be added to the DLQ.
-	var found *tdbgtest.DLQMessage[*persistencespb.TransferTaskInfo]
-	await.Require(ctx, s.T(), func(t *await.T) {
-		dlqTasks := s.readDLQTasks(t.Context())
-		for _, task := range dlqTasks {
-			if task.Payload.RunId == run.GetRunID() {
-				found = &task
-				return
-			}
-		}
-		require.Failf(t, "workflow task not found in DLQ", "run ID: %s", run.GetRunID())
-	}, dlqTestTimeout, 100*time.Millisecond)
+	select {
+	case <-ctx.Done():
+		s.FailNow("timed out waiting for workflow to task to be DLQ'd")
+	case task := <-s.dlqTasks:
+		s.Equal(run.GetRunID(), task.GetRunID())
+	}
 
-	return run, found.MessageID
+	// Verify that the workflow task is in the DLQ.
+	task := s.verifyRunIsInDLQ(ctx, run)
+	dlqMessageID := task.MessageID
+	return run, dlqMessageID
+}
+
+func (s *DLQSuite) verifyRunIsInDLQ(
+	ctx context.Context,
+	run sdkclient.WorkflowRun,
+) tdbgtest.DLQMessage[*persistencespb.TransferTaskInfo] {
+	dlqTasks := s.readDLQTasks(ctx)
+	for _, task := range dlqTasks {
+		if task.Payload.RunId == run.GetRunID() {
+			return task
+		}
+	}
+	s.Fail("workflow task not found in DLQ", run.GetRunID())
+	panic("unreachable")
 }
 
 // executeWorkflow just executes a simple no-op workflow that returns "hello" and returns the sdk workflow run.
@@ -472,7 +470,7 @@ func (s *DLQSuite) purgeMessages(ctx context.Context, maxMessageIDToDelete int64
 	var token adminservice.DLQJobToken
 	s.NoError(proto.Unmarshal(response.GetJobToken(), &token))
 
-	systemSDKClient := s.sdkClientFactory.GetSystemClient()
+	systemSDKClient := s.SystemSdkClient()
 	run := systemSDKClient.GetWorkflow(ctx, token.WorkflowId, token.RunId)
 	s.NoError(run.Get(ctx, nil))
 	return tokenString
@@ -485,7 +483,7 @@ func (s *DLQSuite) mergeMessages(ctx context.Context, maxMessageID int64) string
 	s.NoError(err)
 	var token adminservice.DLQJobToken
 	s.NoError(token.Unmarshal(tokenBytes))
-	systemSDKClient := s.sdkClientFactory.GetSystemClient()
+	systemSDKClient := s.SystemSdkClient()
 	run := systemSDKClient.GetWorkflow(ctx, token.WorkflowId, token.RunId)
 	s.NoError(run.Get(ctx, nil))
 	return tokenString
@@ -617,35 +615,4 @@ func (s *DLQSuite) readTransferTasks(file *os.File) []tdbgtest.DLQMessage[*persi
 	})
 	s.NoError(err)
 	return dlqTasks
-}
-
-// Wrap is used to wrap the executor with our own faulty one.
-func (t testExecutorWrapper) Wrap(delegate queues.Executor) queues.Executor {
-	return &testExecutor{
-		base:  delegate,
-		suite: t.suite,
-	}
-}
-
-// Execute is used to wrap the executor so that we can intercept the workflow task and ensure it fails with a terminal
-// error.
-//
-//nolint:err113
-func (t testExecutor) Execute(ctx context.Context, e queues.Executable) queues.ExecuteResponse {
-	if strings.HasPrefix(e.GetWorkflowID(), *t.suite.failingWorkflowIDPrefix.Load()) && e.GetCategory() == tasks.CategoryTransfer {
-		// Return a terminal error that will cause this task to be added to the DLQ.
-		return queues.ExecuteResponse{
-			ExecutionErr: serialization.NewDeserializationError(enumspb.ENCODING_TYPE_PROTO3, errors.New("test error")),
-		}
-	}
-	return t.base.Execute(ctx, e)
-}
-
-// ReadTasks is used to block the dlq job workflow until one of them is cancelled in TestCancelRunningMerge.
-func (m *testTaskQueueManager) DeleteTasks(
-	ctx context.Context,
-	request *persistence.DeleteTasksRequest,
-) (*persistence.DeleteTasksResponse, error) {
-	<-m.suite.deleteBlockCh
-	return m.HistoryTaskQueueManager.DeleteTasks(ctx, request)
 }

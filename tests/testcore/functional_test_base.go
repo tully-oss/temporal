@@ -38,6 +38,7 @@ import (
 	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/rpc"
+	"go.temporal.io/server/common/rpc/interceptor"
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/common/telemetry"
 	"go.temporal.io/server/common/testing/historyrequire"
@@ -133,6 +134,22 @@ func WithFxOptionsForService(serviceName primitives.ServiceName, options ...fx.O
 	return func(params *TestClusterParams) {
 		params.ServiceOptions[serviceName] = append(params.ServiceOptions[serviceName], options...)
 	}
+}
+
+func WithHistoryTaskQueueManagerCapture(target *persistence.HistoryTaskQueueManager) TestClusterOption {
+	return WithFxOptionsForService(
+		primitives.HistoryService,
+		fx.Populate(target),
+	)
+}
+
+func withFrontendContextMetadataTrailer() TestClusterOption {
+	return WithFxOptionsForService(
+		primitives.FrontendService,
+		fx.Decorate(func(logger log.Logger) *interceptor.ContextMetadataInterceptor {
+			return interceptor.NewContextMetadataInterceptor(true, logger)
+		}),
+	)
 }
 
 func WithDCRedirectionPolicy(policy config.DCRedirectionPolicy) TestClusterOption {
@@ -249,6 +266,14 @@ func (s *FunctionalTestBase) SdkWorker() sdkworker.Worker {
 
 func (s *FunctionalTestBase) SdkClient() sdkclient.Client {
 	return s.sdkClient
+}
+
+func (s *FunctionalTestBase) SystemSdkClient() sdkclient.Client {
+	client, err := sdkclient.NewClientFromExisting(s.SdkClient(), sdkclient.Options{
+		Namespace: primitives.SystemLocalNamespace,
+	})
+	s.NoError(err)
+	return client
 }
 
 func (s *FunctionalTestBase) TaskQueue() string {
