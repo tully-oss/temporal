@@ -233,4 +233,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace go.temporal.io/api => github.com/temporalio/api-go v1.62.13-0.20260525201810-3b88b7b02c06
+replace go.temporal.io/api => github.com/temporalio/api-go v1.62.13-0.20260527023737-52738744e1a5

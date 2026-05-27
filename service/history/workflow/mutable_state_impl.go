@@ -235,6 +235,17 @@ type (
 		wftScheduleToStartTimeoutTask *tasks.WorkflowTaskTimeoutTask
 		wftStartToCloseTimeoutTask    *tasks.WorkflowTaskTimeoutTask
 
+		// rootCallerPrincipalFromStartEvent is a transient (non-persisted)
+		// stash populated when applying the WorkflowExecutionStartedEvent.
+		// It carries the chain-originating principal from the start event's
+		// RootCallerPrincipal attribute through to EnsureChasmWorkflowComponent,
+		// which uses it as the initial value for the chasm Workflow component's
+		// RootCallerPrincipal field. Nil for top-level starts (the principal
+		// flows in via gRPC metadata instead). Set for child workflows and
+		// continue-as-new once the write side (parent / previous run populates
+		// the start event attribute) is wired up.
+		rootCallerPrincipalFromStartEvent *commonpb.Principal
+
 		// In-memory storage for CHASM pure tasks. These are set when CHASM pure tasks are generated and used to
 		// delete them when then are no longer needed. (i.e. when the task's scheduled time is after that of the
 		// earliest valid CHASM pure task's).
@@ -712,15 +723,20 @@ func (ms *MutableStateImpl) EnsureChasmWorkflowComponent(ctx context.Context) {
 
 	if root.ArchetypeID() == chasm.UnspecifiedArchetypeID {
 		mutableContext := chasm.NewMutableContext(ctx, root)
-		// For top-level workflow starts the inbound RPC's authorizer-derived
-		// principal is on the request context as gRPC metadata and represents
-		// this workflow chain's originator. For child workflows and
-		// continue-as-new the caller (StartChildWorkflowExecution /
-		// ContinueAsNewWorkflowExecution command handler) must pre-populate
-		// the request context with the parent's RootCallerPrincipal so the
-		// chain's identity is preserved across hops. See applyContinueAsNew
-		// and the child workflow start path for those overrides.
-		rootCallerPrincipal := headers.GetPrincipal(ctx)
+		// Source the chain-originating principal from one of two places,
+		// in order:
+		//   1. The applied start event's RootCallerPrincipal attribute
+		//      (populated by parent / previous run for child workflows
+		//      and continue-as-new).
+		//   2. The inbound RPC's gRPC metadata principal (for top-level
+		//      starts where the workflow chain originates with this RPC).
+		//
+		// Both may be nil; the chasm Workflow tolerates an empty
+		// RootCallerPrincipal as the graceful-degradation state.
+		rootCallerPrincipal := ms.rootCallerPrincipalFromStartEvent
+		if rootCallerPrincipal == nil {
+			rootCallerPrincipal = headers.GetPrincipal(ctx)
+		}
 		if err := root.SetRootComponent(chasmworkflow.NewWorkflow(mutableContext, chasm.NewMSPointer(ms), rootCallerPrincipal)); err != nil {
 			softassert.Fail(ms.logger, "SetRootComponent failed", tag.Error(err))
 		}
@@ -3016,6 +3032,22 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionStartedEvent(
 	} else {
 		ms.executionInfo.ParentInitiatedVersion = common.EmptyVersion
 	}
+
+	// Stash the start event's root-caller principal on the mutable state
+	// so EnsureChasmWorkflowComponent can pass it through to NewWorkflow
+	// when the chasm tree is first initialized. The chasm Workflow
+	// component is the canonical store; this is just a transient holder
+	// between event-apply and chasm-init.
+	//
+	// For top-level starts the field is empty here — the principal flows
+	// in via the inbound RPC's gRPC metadata (headers.GetPrincipal(ctx))
+	// and EnsureChasmWorkflowComponent reads from there. For child
+	// workflows and continue-as-new the parent / previous run should
+	// have populated event.RootCallerPrincipal at start-event creation
+	// time (see write-side TODOs in the historybuilder/event_factory
+	// and StartChildWorkflowExecution / ContinueAsNewWorkflowExecution
+	// command handlers).
+	ms.rootCallerPrincipalFromStartEvent = event.GetRootCallerPrincipal()
 
 	if event.RootWorkflowExecution != nil {
 		ms.executionInfo.RootWorkflowId = event.RootWorkflowExecution.GetWorkflowId()

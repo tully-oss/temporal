@@ -396,8 +396,8 @@ github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXl
 github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/temporalio/api-go v1.62.13-0.20260525201810-3b88b7b02c06 h1:WaTlY6cWVKfIA79aY1gC9fpmEg0qPhdI2j8EaPG/pzU=
-github.com/temporalio/api-go v1.62.13-0.20260525201810-3b88b7b02c06/go.mod h1:NCzbc7YW11dI47n/oqqz5hnpB2YGc79ce3tDLomVSBg=
+github.com/temporalio/api-go v1.62.13-0.20260527023737-52738744e1a5 h1:Ljdj+xXIWh8Ysg1EZrSls25ma980XkAr4qPsKKrPuig=
+github.com/temporalio/api-go v1.62.13-0.20260527023737-52738744e1a5/go.mod h1:NCzbc7YW11dI47n/oqqz5hnpB2YGc79ce3tDLomVSBg=
 github.com/temporalio/ringpop-go v0.0.0-20250130211428-b97329e994f7 h1:lEebX/hZss+TSH3EBwhztnBavJVj7pWGJOH8UgKHS0w=
 github.com/temporalio/ringpop-go v0.0.0-20250130211428-b97329e994f7/go.mod h1:RE+CHmY+kOZQk47AQaVzwrGmxpflnLgTd6EOK0853j4=
 github.com/temporalio/sqlparser v0.0.0-20231115171017-f4060bcfa6cb h1:YzHH/U/dN7vMP+glybzcXRTczTrgfdRisNTzAj7La04=
