@@ -21,12 +21,10 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/sdk"
 	"go.temporal.io/server/common/searchattribute"
-	"go.temporal.io/server/common/searchattribute/sadefs"
 	legacyscheduler "go.temporal.io/server/service/worker/scheduler"
 	"go.uber.org/fx"
 )
@@ -183,7 +181,10 @@ func (h *SchedulerMigrateToWorkflowTaskHandler) Execute(
 	// as closely as possible. Include TemporalNamespaceDivision so the V1
 	// workflow is discoverable via ListSchedules.
 	sa := &commonpb.SearchAttributes{IndexedFields: maps.Clone(result.searchAttributes)}
-	searchattribute.AddSearchAttribute(&sa, sadefs.TemporalNamespaceDivision, payload.EncodeString(legacyscheduler.NamespaceDivision))
+	searchattribute.AddSearchAttributes(
+		&sa,
+		chasm.SearchAttributeTemporalNamespaceDivision.Value(legacyscheduler.NamespaceDivision),
+	)
 	workflowID := legacyscheduler.WorkflowIDPrefix + result.scheduleID
 	startReq := &workflowservice.StartWorkflowExecutionRequest{
 		RequestId:                uuid.NewString(),
