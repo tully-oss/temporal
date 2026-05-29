@@ -198,6 +198,7 @@ type (
 	// where MutableState is defined.
 	NodeBackend interface {
 		// TODO: Add methods needed from MutateState here.
+		ExecutionStateUpdated() bool
 		GetExecutionState() *persistencespb.WorkflowExecutionState
 		GetExecutionInfo() *persistencespb.WorkflowExecutionInfo
 		GetApproximatePersistedSize() int
@@ -1521,7 +1522,7 @@ func (n *Node) CloseTransaction() (NodesMutation, error) {
 		return NodesMutation{}, err
 	}
 
-	if n.isActiveStateDirty {
+	if n.isActiveStateDirty || rootLifecycleChanged {
 		if err := n.closeTransactionForceUpdateVisibility(immutableContext, rootLifecycleChanged); err != nil {
 			return NodesMutation{}, err
 		}
@@ -1591,7 +1592,7 @@ func (n *Node) closeTransactionHandleRootLifecycleChange(
 ) (bool, error) {
 	if n.backend.IsWorkflow() {
 		// Workflow manages its lifecycle directly in mutable state.
-		return false, nil
+		return n.backend.ExecutionStateUpdated(), nil
 	}
 
 	if n.valueState != valueStateNeedSerialize {
